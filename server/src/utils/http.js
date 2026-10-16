@@ -86,7 +86,11 @@ export async function fetchWithRetry(
       }
 
       const retryAfter = parseRetryAfter(response.headers?.get?.("retry-after"));
-      await response.body?.cancel?.().catch(() => {});
+      try {
+        await response.body?.cancel?.();
+      } catch {
+        // ignore body cancellation errors
+      }
       await sleep(retryAfter ?? backoffDelay(attempt));
     } catch (err) {
       lastError = err;
