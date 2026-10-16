@@ -1,6 +1,7 @@
-import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import { config } from "./config.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 
 const app = express();
 
@@ -11,7 +12,8 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-const port = process.env.PORT || 4000;
-app.listen(port, () => {
-  console.log(`Server listening on http://localhost:${port}`);
+app.use(errorHandler);
+
+app.listen(config.port, () => {
+  console.log(`Server listening on http://localhost:${config.port}`);
 });
