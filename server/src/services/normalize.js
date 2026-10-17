@@ -255,7 +255,7 @@ export function normalizeCompanyReport({ research = {}, enrichment = {}, query =
   let contactInfo;
   if (isMock) {
     contactInfo = unavailable("mock data");
-  } else if (Array.isArray(enrichment.contacts) && enrichment.contacts.length > 0) {
+  } else if (Array.isArray(enrichment?.contacts) && enrichment.contacts.length > 0) {
     decisionMakers = enrichment.contacts.map((c) => ({
       name: c.name ?? null,
       role: c.title ?? c.role ?? null,
