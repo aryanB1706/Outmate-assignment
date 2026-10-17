@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 const STATUS_STYLES = {
   verified: "bg-green-100 text-green-800 border-green-200",
   "provider-reported": "bg-blue-100 text-blue-800 border-blue-200",
@@ -23,12 +25,33 @@ const FIELD_ORDER = [
   { key: "contactInfo", label: "Contact info" },
 ];
 
+function domainOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function formatDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
+}
+
+function detectMock(report) {
+  if (!report) return false;
+  const warningText = (report.warnings ?? []).join(" ");
+  if (/mock/i.test(warningText)) return true;
+  return FIELD_ORDER.some(({ key }) => report?.[key]?.note === "mock data");
+}
+
 function StatusBadge({ status }) {
   const style = STATUS_STYLES[status] ?? STATUS_STYLES.unavailable;
   const label = STATUS_LABELS[status] ?? status ?? "unavailable";
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${style}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${style}`}
     >
       {label}
     </span>
@@ -42,14 +65,14 @@ function SourceLinks({ sources }) {
   return (
     <ul className="flex flex-wrap gap-x-3 gap-y-1">
       {sources.map((url) => (
-        <li key={url}>
+        <li key={url} className="max-w-full">
           <a
             href={url}
             target="_blank"
             rel="noreferrer"
-            className="text-xs text-blue-600 underline hover:text-blue-800"
+            className="block truncate text-xs text-blue-600 underline hover:text-blue-800"
           >
-            {url}
+            {domainOf(url)}
           </a>
         </li>
       ))}
@@ -65,12 +88,12 @@ function FieldCard({ label, field }) {
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-700">{label}</h3>
         <StatusBadge status={field?.status} />
       </div>
       {value ? (
-        <p className="whitespace-pre-line text-sm text-slate-800">{value}</p>
+        <p className="whitespace-pre-line break-words text-sm text-slate-800">{value}</p>
       ) : (
         <p className="text-sm italic text-slate-400">
           {field?.note ? `Unavailable — ${field.note}` : "Unavailable"}
@@ -96,18 +119,18 @@ function GrowthSignals({ signals }) {
               {signal.type}
             </span>
             <span className="text-xs text-slate-500">
-              {signal.date ? new Date(signal.date).toLocaleDateString() : "date unknown"}
+              {formatDate(signal.date) ?? "date unknown"}
             </span>
           </div>
-          <p className="text-sm text-slate-800">{signal.summary}</p>
+          <p className="break-words text-sm text-slate-800">{signal.summary}</p>
           {signal.sourceUrl && (
             <a
               href={signal.sourceUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-blue-600 underline hover:text-blue-800"
+              className="truncate text-xs text-blue-600 underline hover:text-blue-800"
             >
-              {signal.sourceUrl}
+              {domainOf(signal.sourceUrl)}
             </a>
           )}
         </li>
@@ -118,9 +141,7 @@ function GrowthSignals({ signals }) {
 
 function DecisionMakers({ makers }) {
   if (!makers || makers.length === 0) {
-    return (
-      <p className="text-sm italic text-slate-400">No decision makers available.</p>
-    );
+    return <p className="text-sm italic text-slate-400">No decision makers available.</p>;
   }
   return (
     <div className="overflow-x-auto">
@@ -149,7 +170,7 @@ function DecisionMakers({ makers }) {
                     rel="noreferrer"
                     className="text-xs text-blue-600 underline hover:text-blue-800"
                   >
-                    {maker.sourceUrl}
+                    {domainOf(maker.sourceUrl)}
                   </a>
                 ) : (
                   <span className="text-xs text-slate-400">—</span>
@@ -163,42 +184,137 @@ function DecisionMakers({ makers }) {
   );
 }
 
+function MissingInfo({ report }) {
+  const missing = report.missingFields ?? [];
+  const warnings = report.warnings ?? [];
+  if (missing.length === 0 && warnings.length === 0) {
+    return null;
+  }
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-6">
+      <h3 className="text-lg font-semibold text-amber-900">
+        Missing / uncertain information
+      </h3>
+      {missing.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-amber-700">
+            Fields
+          </p>
+          <ul className="mt-1 flex flex-wrap gap-2">
+            {missing.map((name) => (
+              <li
+                key={name}
+                className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-xs text-amber-800"
+              >
+                {name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-amber-700">
+            Warnings
+          </p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-amber-900">
+            {warnings.map((warning, index) => (
+              <li key={index} className="break-words">
+                {warning}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ReportView({ report }) {
+  const [copied, setCopied] = useState(false);
+
   if (!report) return null;
 
+  const json = JSON.stringify(report, null, 2);
+  const mockUsed = detectMock(report);
   const generatedAt = report.generatedAt
     ? new Date(report.generatedAt).toLocaleString()
     : null;
+  const filename = `${(report.companyName?.value || "report")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")}.json`;
+
+  function handleDownload() {
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(json);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
     <section className="space-y-6">
       <header className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-2xl font-bold text-slate-900">
-          {report.companyName?.value || "Unknown company"}
-        </h2>
-        {report.website?.value && (
-          <a
-            href={`https://${report.website.value}`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sm text-blue-600 underline hover:text-blue-800"
-          >
-            {report.website.value}
-          </a>
-        )}
-        {generatedAt && (
-          <p className="mt-2 text-xs text-slate-400">Generated {generatedAt}</p>
-        )}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold break-words text-slate-900">
+              {report.companyName?.value || "Unknown company"}
+            </h2>
+            {report.website?.value && (
+              <a
+                href={`https://${report.website.value}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-blue-600 underline hover:text-blue-800"
+              >
+                {report.website.value}
+              </a>
+            )}
+            {generatedAt && (
+              <p className="mt-2 text-xs text-slate-400">Generated {generatedAt}</p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+            >
+              Download JSON
+            </button>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              {copied ? "Copied!" : "Copy JSON"}
+            </button>
+          </div>
+        </div>
       </header>
 
-      {report.warnings?.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h3 className="text-sm font-semibold text-amber-800">Warnings</h3>
-          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-amber-800">
-            {report.warnings.map((warning, index) => (
-              <li key={index}>{warning}</li>
-            ))}
-          </ul>
+      {mockUsed && (
+        <div
+          role="status"
+          className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900"
+        >
+          Enrichment provider is not integrated — mock/placeholder enrichment data was
+          used and is never shown as provider-reported.
         </div>
       )}
 
@@ -218,25 +334,26 @@ export default function ReportView({ report }) {
         <DecisionMakers makers={report.decisionMakers} />
       </div>
 
+      <MissingInfo report={report} />
+
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="mb-2 text-lg font-semibold text-slate-800">All sources</h3>
+        <h3 className="mb-2 text-lg font-semibold text-slate-800">Sources</h3>
         {report.sources?.length > 0 ? (
-          <ul className="space-y-2">
+          <ul className="divide-y divide-slate-100">
             {report.sources.map((source) => (
-              <li key={source.url} className="text-sm">
+              <li key={source.url} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:gap-3">
                 <a
                   href={source.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-blue-600 underline hover:text-blue-800"
+                  className="break-words text-sm text-blue-600 underline hover:text-blue-800"
                 >
                   {source.title || source.url}
                 </a>
-                {source.publishedDate && (
-                  <span className="ml-2 text-xs text-slate-400">
-                    {new Date(source.publishedDate).toLocaleDateString()}
-                  </span>
-                )}
+                <span className="text-xs text-slate-500">
+                  {domainOf(source.url)}
+                  {formatDate(source.publishedDate) ? ` · ${formatDate(source.publishedDate)}` : ""}
+                </span>
               </li>
             ))}
           </ul>
